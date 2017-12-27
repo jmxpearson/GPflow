@@ -162,23 +162,26 @@ def uncertain_conditional(Xnew_mu, Xnew_var, feat, kern, q_mu, q_sqrt, *,
 
     q_sqrt_r = tf.matrix_band_part(tf.transpose(q_sqrt, (2, 0, 1)), -1, 0)  # D x M x M
 
+    eKff = kern.eKdiag(Xnew_mu, Xnew_var)  # N
+    eKuffu = feat.eKufKfu(kern, Xnew_mu, Xnew_var)  # N x M x M
     eKuf = tf.transpose(feat.eKfu(kern, Xnew_mu, Xnew_var))  # M x N
     Kuu = feat.Kuu(kern, jitter=settings.numerics.jitter_level)  # M x M
     Luu = tf.cholesky(Kuu)  # M x M
+    I = tf.eye(tf.shape(Luu)[0], dtype=settings.float_type)
+    Luu_inv = tf.matrix_triangular_solve(Luu, I, lower=True)
 
     if not white:
-        q_mu = tf.matrix_triangular_solve(Luu, q_mu, lower=True)
-        Luu_tiled = tf.tile(Luu[None, :, :], [num_func, 1, 1])  # remove line once issue 216 is fixed
-        q_sqrt_r = tf.matrix_triangular_solve(Luu_tiled, q_sqrt_r, lower=True)
+        q_mu = tf.matmul(Luu_inv, q_mu)
+        Luu_inv_tiled = tf.tile(Luu_inv[None, :, :], [num_func, 1, 1])  # remove line once issue 216 is fixed
+        q_sqrt_r = tf.matmul(Luu_inv_tiled, q_sqrt_r)
 
-    Li_eKuf = tf.matrix_triangular_solve(Luu, eKuf, lower=True)  # M x N
+    Li_eKuf = tf.matmul(Luu_inv, eKuf)  # M x N
     fmean = tf.matmul(Li_eKuf, q_mu, transpose_a=True)
 
-    eKff = kern.eKdiag(Xnew_mu, Xnew_var)  # N
-    eKuffu = feat.eKufKfu(kern, Xnew_mu, Xnew_var)  # N x M x M
-    Luu_tiled = tf.tile(Luu[None, :, :], [num_data, 1, 1])  # remove this line, once issue 216 is fixed
-    Li_eKuffu_Lit = tf.matrix_triangular_solve(Luu_tiled, tf.matrix_transpose(eKuffu), lower=True)
-    Li_eKuffu_Lit = tf.matrix_triangular_solve(Luu_tiled, tf.matrix_transpose(Li_eKuffu_Lit), lower=True)  # N x M x M
+    Luu_inv_tiled = tf.tile(Luu_inv[None, :, :], [num_data, 1, 1])  # remove this line, once issue 216 is fixed
+
+    Li_eKuffu_Lit = tf.matmul(Luu_inv_tiled, eKuffu, transpose_b=True)
+    Li_eKuffu_Lit = tf.matmul(Luu_inv_tiled, Li_eKuffu_Lit, transpose_b=True)  # N x M x M
 
     cov = tf.matmul(q_sqrt_r, q_sqrt_r, transpose_b=True)  # D x M x M
 
